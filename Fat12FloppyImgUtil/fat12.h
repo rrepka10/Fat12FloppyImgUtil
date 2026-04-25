@@ -37,7 +37,7 @@ int readFloppyDisk(const char* file_name, floppy* disk);
 int writeFloppyDisk(const char* file_name, const floppy* disk);
 
 // Create a blank FAT12 image in memory
-int createBlankDisk(const floppy* disk);
+int createBlankDisk(floppy* disk);
 
 // return 1 if the floppy image is bootable, else return 0
 int verifyBootId(const floppy* disk);

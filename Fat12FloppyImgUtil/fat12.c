@@ -145,11 +145,11 @@ static void write_root_dir(uint8_t* img) {
 
 // Create a blank FAT12 image in memory, return 0 when success, else return 1
 // Assumeds disk is already allocated and initialized to 0, so just write the boot sector, FAT tables and root directory        
-int createBlankDisk(const floppy* disk) { 
-        write_boot_sector(disk);
-        write_fats(disk);
-        write_root_dir(disk);
-        return 0;
+int createBlankDisk(floppy* disk) { 
+    write_boot_sector(disk->storage);
+    write_fats(disk->storage);
+    write_root_dir(disk->storage);
+    return 0;
     }
 
 
@@ -549,10 +549,6 @@ int copyFileFromSys(floppy* disk, const directory* dir, const char* src, const c
     }
     return 1;
 }
-
-
-
-
 
 
 // return 1 when succeed, else return 0

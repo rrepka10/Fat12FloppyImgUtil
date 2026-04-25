@@ -629,7 +629,7 @@ WORD allocFATClus(floppy* disk, unsigned int count, WORD pre_clus) {
     WORD max_clusters = (header->BPB_FATSz16 * header->BPB_BytesPerSec) * 2 / 3; // divided by 1.5
     WORD head_clus = 0;
     int head_clus_is_set = 0;
-    int allocated = 0; // number of allocated clusters
+    unsigned int allocated = 0; // number of allocated clusters
     for (WORD i = 2; i < max_clusters; ++i) {
         if (readFATAtPosition(FAT1, i) == NOT_USED_CLUSTER_NUM) {
             if (pre_clus) {

@@ -11,7 +11,8 @@
 const char* scanFormat = { "%"  XSTRING(BUFF_SIZE) "s" };     // Causes the passed #define symbol to expand to a value
 
 
-void printHelpInfo() {
+void interactiveHelpInfo() {
+	printf("Fat12FloppyImgUtil help - for command line mode help\n");
     printf("info                -- print FAT12 header infomation of the disk.\n");
     printf("bootable            -- check if the floppy is bootable. (by verifying 0x55AA)\n");
     printf("ls                  -- list all file and sub-directory in current directory.\n");
@@ -31,6 +32,20 @@ void printHelpInfo() {
     printf("quit                -- quit and save all changed.\n");
 }
 
+void generalHelpInfo() {
+	printf("This utility is used to create and/or modify DOS FAT12 formatted,\n");
+	printf("1.44 MB (.img, .ima) image files.  This program has an command line\n");
+	printf("mode and interactive mode, exact features differ.\n");
+	printf("Cmd syntax: Fat12FloppyImg <img_file>   excp <src> <dest> | mkdir <dir> | label <label>\n");
+	printf("   img_file          - required .img file to process, created if it does not exist\n");
+	printf("   excp <src> <dest> - Copy src from OS to dest on image, use '/' for dest path delimiter");
+	printf("   mkdir <dir>       - Make the die subdirectory on the img\n");
+	printf("   label <label>     - Add a disk lable to the img file\n\n");
+	printf("Interactive: Fat12FloppyImg [<img_file>]\n");
+	printf("   img_file is optional, if specified it will be created if it does not exist\n");
+	printf("     type 'help' in interactive mode for more information\n\n");
+}
+
 int main(int argc, char *argv[]) {
     char name[BUFF_SIZE];
     char* buffer = (char*)malloc(BUFF_SIZE*4);
@@ -38,52 +53,90 @@ int main(int argc, char *argv[]) {
     char* const path = buffer + BUFF_SIZE;
     char* const path2 = buffer + BUFF_SIZE * 2;
     char* const path3 = buffer + BUFF_SIZE * 3;
+    directory dir;
+
     int changed = 0; // if the disk is written
+	int cmdLineMode = 0; // if the command is given in command line argument, else read from user input
 
     
     // get file name from command line argument or user input
     if (argc > 1) {
+		if (!strcmp(argv [1], "help") || !strcmp(argv [1], "h")) {
+			generalHelpInfo();
+			return 1;
+		}
+		// Must be a file name
         strncpy(name,  argv[1], BUFF_SIZE);
     }
     else {
         printf("Input file name: ");
- 
         scanf(scanFormat, name);
     }
     name[BUFF_SIZE-1] = 0;
-   printf("Input file %s\n", name);
+	printf("Input file %s\n", name);
 
 
    // Try to read floppy disk image from the file
     floppy* disk = (floppy*)calloc(1,   sizeof(floppy));
-
-    // Create a blank FAT12 image in memory, return 1 when success, else return 0
-    if (createBlankDisk(disk)) {
-        printf("Failed to create a blank FAT12 disk image.\n");
-        free(disk);
-        return 1;
-	}   
-	changed = 1; // the disk is written by createBlankDisk, so set changed to 1 to make sure it would be written to file when quit
-
-#if 0
     if (!readFloppyDisk(name, disk)) {
-        printf("Failed to read %s image from file.\n", name);
-        free(disk);
-        return 1;
+		// Create a blank FAT12 image in memory, return 1 when success, else return 0
+		if (createBlankDisk(disk)) {
+			printf("Failed to create a blank FAT12 disk image.\n");
+			free(disk);
+			return 1;
+		}   
+		changed = 1; 
     }
-#endif
-    directory dir;
     initDirWithRoot(&dir);
 
- 
+	// Are we in command line mode? excp <src> <dest> | mkdir <dir> | label <label>
+	if (argc > 2) {
+		changed = 1;
+		cmdLineMode = 1;
+		if (!strcmp(argv [2], "excp") && (argc == 5)) {
+			strncpy(path, argv[3], BUFF_SIZE);
+            path[BUFF_SIZE - 1] = 0;
+			strncpy(path2, argv[4], BUFF_SIZE);
+            path2[BUFF_SIZE - 1] = 0;
+
+            if (!copyFileFromSys(disk, &dir, path, path2)) {   
+                printf("Failed to copy file from \"%s\" to \"%s\"\n", path, path2);
+				free(disk);
+				return 1;
+            }
+		}
+		else if (!strcmp(argv [2], "mkdir") && (argc == 4)) {
+			strncpy(path, argv[3], BUFF_SIZE);
+            path[BUFF_SIZE - 1] = 0;
+            if (!makeDirByPath(disk, &dir, path)) {
+                printf("Failed to make directory \"%s\"\n", path);
+				free(disk);
+				return 1;
+            }
+		}
+		
+		else if (!strcmp(argv [2], "label") && (argc == 4)) {
+			strncpy(command, argv[3], 11);
+            command[11] = 0;
+            changeLabel(disk, command);
+		}
+		
+		else {
+			printf("Error, invalid command line option\n");
+			free(disk);
+            return 1;
+		}
+		
+	}
+
     printf("Input \"help\" to get help infomation.\n");
-    while (1) {
+    while (cmdLineMode == 0) {
         printf("[%s]$ ", dir.path_str);
         scanf(scanFormat, command);
 		command[BUFF_SIZE-1] = 0;
 
         if ((!strcmp(command, "help")) || (!strcmp(command, "h"))) {
-            printHelpInfo();
+            interactiveHelpInfo();
 
         } else if (!strcmp(command, "bootable")) {
             if (verifyBootId(disk)) {
@@ -198,7 +251,8 @@ int main(int argc, char *argv[]) {
         } else {
             printf("Unkown command: %s\n", command);
         }
-    }
+    } // End while (1)
+		
     free(buffer);
     destroyDir(&dir);
     if (changed) {
