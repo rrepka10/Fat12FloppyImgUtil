@@ -6,6 +6,23 @@
 # include "fat12.h"
 # include "fat12_internal.h"
 
+// Simple allocation helpers: log on failure and return NULL
+void* safe_malloc(size_t size) {
+    void* p = malloc(size);
+    if (!p) {
+        fprintf(stderr, "safe_malloc: Out of memory allocating %zu bytes\n", size);
+    }
+    return p;
+}
+
+void* safe_calloc(size_t nmemb, size_t size) {
+    void* p = calloc(nmemb, size);
+    if (!p) {
+        fprintf(stderr, "safe_calloc: Out of memory allocating %zu elements of %zu bytes\n", nmemb, size);
+    }
+    return p;
+}
+
 // to emulate the real way using BIOS
 void loadSectors(const floppy* disk, WORD logic_sec_num, WORD count, BYTE* buf) {
     const fat12_header* const header = (const fat12_header* const)disk->storage;
@@ -17,30 +34,32 @@ void writeSectors(floppy* disk, WORD logic_sec_num, WORD count, const BYTE* buf)
     memcpy(disk->storage + logic_sec_num * header->BPB_BytesPerSec, buf, header->BPB_BytesPerSec * count);
 }
 
-// write the number to specific position of FAT12 record
+// write the number to specific position of FAT12 record (byte-wise to avoid aliasing/unaligned access)
 void writeFATAtPosition(BYTE* FAT, WORD pos, WORD num) {
-    if (pos & 1) { // odd
-        int offset = (pos - 1) / 2 * 3 + 1;
-        WORD* at = (WORD*)(FAT + offset);
-        WORD target = (0x000F & (*at)) | (num << 4);
-        *at = target;
-    } else { // even
-        int offset = pos / 2 * 3;
-        WORD* at = (WORD*)(FAT + offset);
-        WORD target = (0xF000 & (*at)) | (0x0FFF & num);
-        *at = target;
+    int offset = (pos * 3) / 2;
+    if ((pos & 1) == 0) { // even
+        // lower 12 bits occupy FAT[offset] and low nibble of FAT[offset+1]
+        FAT[offset] = (BYTE)(num & 0xFF);
+        FAT[offset + 1] = (BYTE)((FAT[offset + 1] & 0xF0) | ((num >> 8) & 0x0F));
+    } else { // odd
+        // upper 12 bits occupy high nibble of FAT[offset] and FAT[offset+1]
+        FAT[offset] = (BYTE)((FAT[offset] & 0x0F) | ((num << 4) & 0xF0));
+        FAT[offset + 1] = (BYTE)((num >> 4) & 0xFF);
     }
 }
 
 WORD readFATAtPosition(const BYTE* FAT, WORD pos) {
-    if (pos & 1) { // odd
-        int offset = (pos - 1) / 2 * 3 + 1;
-        WORD num = *(const WORD*)(FAT + offset);
-        return (num >> 4);
-    } else { // even
-        int offset = pos / 2 * 3;
-        WORD num = *(const WORD*)(FAT + offset);
-        return (num & 0x0FFF);
+    int offset = (pos * 3) / 2;
+    if ((pos & 1) == 0) { // even
+        // lower 12 bits: FAT[offset] + low nibble of FAT[offset+1]
+        WORD low = FAT[offset];
+        WORD high = FAT[offset + 1] & 0x0F;
+        return (WORD)(low | (high << 8));
+    } else { // odd
+        // upper 12 bits: high nibble of FAT[offset] + FAT[offset+1]
+        WORD low = (FAT[offset] >> 4) & 0x0F;
+        WORD high = FAT[offset + 1];
+        return (WORD)(low | (high << 4));
     }
 }
 
@@ -122,6 +141,12 @@ void printFileEnt(const file_entry* ent) {
 
 void fileVectorInit(file_vector* p) {
     p->storage=(file_entry*)malloc(sizeof(file_entry) * 2);
+    if (!p->storage) {
+        fprintf(stderr, "fileVectorInit: Out of memory allocating vector storage\n");
+        p->max_size = 0;
+        p->size = 0;
+        exit(EXIT_FAILURE);
+    }
     p->max_size = 2;
     p->size = 0;
 }
@@ -129,6 +154,10 @@ void fileVectorInit(file_vector* p) {
 void fileVectorAppend(file_vector* p, const file_entry* ent) {
     if (p->size == p->max_size) {
         file_entry* temp = (file_entry*)malloc(sizeof(file_entry) * (p->max_size * 2));
+        if (!temp) {
+            fprintf(stderr, "fileVectorAppend: Out of memory expanding vector to %d entries\n", p->max_size * 2);
+            exit(EXIT_FAILURE);
+        }
         memcpy(temp, p->storage, sizeof(file_entry) * p->max_size);
         free(p->storage);
         p->storage = temp;
@@ -220,6 +249,12 @@ void formatNameToFATType(const char* name, BYTE* buffer) {
 
 void entTreeInit(ent_tree* p) {
     p->storage = (ent_tree_node*)malloc(sizeof(ent_tree_node) * 2);
+    if (!p->storage) {
+        fprintf(stderr, "entTreeInit: Out of memory allocating tree storage\n");
+        p->max_size = 0;
+        p->size = 0;
+        exit(EXIT_FAILURE);
+    }
     p->max_size = 2;
     p->size = 0;
 }
@@ -227,6 +262,10 @@ void entTreeInit(ent_tree* p) {
 void entTreeAppend(ent_tree* p, const file_entry* ent, void* sub_tree) {
     if (p->size == p->max_size) {
         ent_tree_node* temp = (ent_tree_node*)malloc(sizeof(ent_tree_node) * (p->max_size * 2));
+        if (!temp) {
+            fprintf(stderr, "entTreeAppend: Out of memory expanding tree to %zu nodes\n", p->max_size * 2);
+            exit(EXIT_FAILURE);
+        }
         memcpy(temp, p->storage, sizeof(ent_tree_node) * p->max_size);
         free(p->storage);
         p->storage = temp;
@@ -264,8 +303,17 @@ ent_tree* getEntTree(const floppy* disk, WORD dir_clus_num) {
 
     int FAT_sectors = header->BPB_NumFATs * header->BPB_FATSz16;
 
-    BYTE* now_clus = (BYTE*)malloc(bytes_per_clus);
-    ent_tree* tree = (ent_tree*)malloc(sizeof(ent_tree));
+    BYTE* now_clus = (BYTE*)safe_malloc(bytes_per_clus);
+    if (!now_clus) {
+        fprintf(stderr, "getEntTree: Out of memory allocating cluster buffer (%d bytes)\n", bytes_per_clus);
+        return NULL;
+    }
+    ent_tree* tree = (ent_tree*)safe_malloc(sizeof(ent_tree));
+    if (!tree) {
+        fprintf(stderr, "getEntTree: Out of memory allocating ent_tree\n");
+        free(now_clus);
+        return NULL;
+    }
     entTreeInit(tree);
     char buffer[13];
     if (dir_clus_num == 0) {

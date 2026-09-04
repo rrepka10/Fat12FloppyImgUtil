@@ -174,6 +174,12 @@ void initDirWithRoot(directory* dir) {
     dir->clus_num = 0;
     dir->max_path_len = 256;
     dir->path_str = (char*)malloc(sizeof(char) * 256);
+    if (!dir->path_str) {
+        dir->max_path_len = 0;
+        dir->path_str = NULL;
+        fprintf(stderr, "initDirWithRoot: Out of memory allocating path_str\n");
+        return;
+    }
     memset(dir->path_str, 0, 256);
     dir->path_str[0] = '/';
 }
@@ -192,6 +198,11 @@ void printAllInDir(const floppy* disk, const directory* dir) {
     fileVectorInit(&vector);
 
     BYTE* now_clus = (BYTE*)malloc(bytes_per_clus); // buffer for loading cluster
+    if (!now_clus) {
+        fprintf(stderr, "printAllInDir: Out of memory allocating cluster buffer (%d bytes)\n", bytes_per_clus);
+        fileVectorDestroy(&vector);
+        return;
+    }
     if (dir->clus_num == 0) {
         // list root directory
         int root_head_sec = 1 + FAT_sectors;
@@ -287,6 +298,10 @@ int changeDirectory(const floppy* disk, directory* dir, const char* path) {
     while (now_max_len < len + origin_len + 2) now_max_len *= 2; // +2 include '/' and '\0'
     if (now_max_len != dir->max_path_len) {
         char* temp = (char*)malloc(sizeof(char) * now_max_len);
+        if (!temp) {
+            fprintf(stderr, "changeDirectory: Out of memory allocating %d bytes\n", now_max_len);
+            return 0;
+        }
         if (!is_absolute) {
             memcpy(temp, dir->path_str, origin_len);
         }
@@ -313,6 +328,11 @@ int printFileContentByPath(const floppy* disk, const directory* dir, const char*
         return 0;
     }
     BYTE* buffer = (BYTE*)malloc(ent->DIR_FileSize);
+    if (!buffer) {
+        fprintf(stderr, "printFileContentByPath: Out of memory allocating %u bytes\n", ent->DIR_FileSize);
+        free(ent);
+        return 0;
+    }
     int loaded = readFileContentByEnt(disk, ent, buffer);
     if (loaded == 0) return 0; // something wrong with the file entry
     for (unsigned int i = 0; i < ent->DIR_FileSize; ++i) {
@@ -344,6 +364,11 @@ int copyFileByPath(floppy* disk, const directory* dir, const char* src, const ch
     WORD des_dir = dir->clus_num;
     if (i >= 0) { // path includes a direcotry path before file name
         char* dir_path = (char*)malloc((i + 2) * sizeof(char));
+        if (!dir_path) {
+            fprintf(stderr, "copyFileByPath: Out of memory allocating %d bytes for dir_path\n", i + 2);
+            free(src_ent);
+            return 0;
+        }
         memcpy(dir_path, des, (i + 1));
         dir_path[i + 1] = '\0';
         file_entry* des_dir_ent = getFileEntByPath(disk, dir->clus_num, dir_path);
@@ -450,6 +475,11 @@ int copyFileFromSys(floppy* disk, const directory* dir, const char* src, const c
         return 0;
 	}
     buffer = malloc(FLOPPY_SIZE);
+    if (!buffer) {
+        fprintf(stderr, "copyFileFromSys: Out of memory allocating FLOPPY_SIZE buffer\n");
+        fclose(fp);
+        return 0;
+    }
     int bytesRead = (int) fread(buffer, 1, file_status.st_size, fp);
     if (bytesRead != file_status.st_size) {
 		fprintf(stderr, "Error: Unable to read the entire file '%s'\n", src);
@@ -467,6 +497,12 @@ int copyFileFromSys(floppy* disk, const directory* dir, const char* src, const c
     WORD des_dir = dir->clus_num;
     if (i >= 0) { // path includes a directory path before file name
         char* dir_path = (char*)malloc((i + 2) * sizeof(char));
+        if (!dir_path) {
+            fprintf(stderr, "copyFileFromSys: Out of memory allocating %d bytes for dir_path\n", i + 2);
+            free(buffer);
+            fclose(fp);
+            return 0;
+        }
         memcpy(dir_path, des, (i + 1));
         dir_path[i + 1] = '\0';
         file_entry* des_dir_ent = getFileEntByPath(disk, dir->clus_num, dir_path);

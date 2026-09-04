@@ -2,6 +2,11 @@
 # define FAT12_INTERNAL_H_
 
 # include "fat12.h"
+# include <stddef.h>
+
+// Allocation helpers
+void* safe_malloc(size_t size);
+void* safe_calloc(size_t nmemb, size_t size);
 
 # define EOF_CLUSTER_NUM 0xFFF
 # define NOT_USED_CLUSTER_NUM 0x000
