@@ -38,3 +38,6 @@ This utility is used to create and/or modify DOS FAT12 formatted, 1.44 MB (.img,
     <li>cpdir {src} {des}   -- copy from {src} directory to {des} directory (recursive)       </li>
     <li>concat {1} {2} {des}-- concat content of file {1} and {2} to {des} file.              </li>
 </ul>
+
+# Sample IMG file data can be found at 
+https://github.com/rambkk/floppy-disk-image-file-.img
